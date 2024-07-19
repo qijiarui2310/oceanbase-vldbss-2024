@@ -123,13 +123,61 @@ int ObTransformMinMax::do_transform(ObSelectStmt *select_stmt)
   if (OB_ISNULL(select_stmt)) {
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("params have null", K(ret), K(select_stmt));
-  } else if (OB_FAIL(do_minmax_transform(select_stmt))) {
-    LOG_WARN("failed to transform minmax", K(ret));
+  } else if (select_stmt->get_aggr_item_size() == 1) {
+    if (OB_FAIL(do_single_minmax_transform(select_stmt))) {
+      LOG_WARN("failed to transform single minmax", K(ret));
+    }
+  } else if (select_stmt->get_aggr_item_size() > 1) {
+    if (OB_FAIL(do_multi_minmax_transform(select_stmt))) {
+      LOG_WARN("failed to transform multi minmax", K(ret));
+    }
   }
   return ret;
 }
 
-int ObTransformMinMax::do_minmax_transform(ObSelectStmt *select_stmt)
+int ObTransformMinMax::do_single_minmax_transform(ObSelectStmt *select_stmt)
+{
+  int ret = OB_SUCCESS;
+  ObRawExpr *aggr_param = NULL;
+  ObRawExpr *new_aggr_param = NULL;
+  ObSelectStmt *child_stmt = NULL;
+  ObSEArray<ObRawExpr*, 1> old_exprs;
+  ObSEArray<ObRawExpr*, 1> new_exprs;
+  if (OB_ISNULL(select_stmt) || OB_ISNULL(ctx_) || OB_ISNULL(ctx_->expr_factory_)) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_WARN("params have null", K(ret), K(select_stmt), K(ctx_));
+  } else if (select_stmt->get_aggr_item_size() != 1) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("get unexpected param", K(ret));
+  } else {
+    ObAggFunRawExpr *aggr_expr = select_stmt->get_aggr_item(0);
+    ObRawExprCopier copier(*ctx_->expr_factory_);
+    if (OB_ISNULL(aggr_expr) || OB_ISNULL(aggr_param = aggr_expr->get_param_expr(0))) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("aggr expr unexpected null", K(ret));
+    } else if (OB_FAIL(ObTransformUtils::create_simple_view(ctx_, select_stmt, child_stmt))) {
+      LOG_WARN("failed to create simple view", K(ret));
+    } else if (OB_FAIL(select_stmt->get_column_exprs(old_exprs))) {
+      LOG_WARN("failed to get column exprs", K(ret));
+    } else if (OB_FAIL(child_stmt->get_select_exprs(new_exprs))) {
+      LOG_WARN("failed to get select exprs", K(ret));
+    } else if (OB_FAIL(copier.add_replaced_expr(old_exprs, new_exprs))) {
+      LOG_WARN("failed to add replace pair", K(ret));
+    } else if (OB_FAIL(copier.copy(aggr_param, new_aggr_param))) {
+      LOG_WARN("failed to copy expr", K(ret));
+    } else if (OB_FAIL(set_child_condition(child_stmt, new_aggr_param))) {
+      LOG_WARN("failed to set child condition", K(ret));
+    } else if (OB_FAIL(set_child_order_item(child_stmt, new_aggr_param, aggr_expr->get_expr_type()))) {
+      LOG_WARN("failed to set child order item", K(ret));
+    } else if (OB_FAIL(ObTransformUtils::set_limit_expr(child_stmt, ctx_))) {
+      LOG_WARN("failed to set child limit item", K(ret));
+    } else {
+      LOG_TRACE("Succeed to do transform min max", K(*select_stmt));
+    }
+  }
+  return ret;
+}
+int ObTransformMinMax::do_multi_minmax_transform(ObSelectStmt *select_stmt)
 {
   int ret = OB_SUCCESS;
   ObSelectStmt *view_child_stmt = NULL;
@@ -156,11 +204,16 @@ int ObTransformMinMax::do_minmax_transform(ObSelectStmt *select_stmt)
       LOG_WARN("failed to get select exprs", K(ret));
     } else if (OB_FAIL(copier.add_replaced_expr(old_exprs, new_exprs))) {
       LOG_WARN("failed to add replace pair", K(ret));
-    } else if (OB_ISNULL(aggr_expr = select_stmt->get_aggr_item(0))
+    } 
+    
+    for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_aggr_item_size(); ++i) {
+     if (OB_ISNULL(aggr_expr = select_stmt->get_aggr_item(i))
           || OB_ISNULL(aggr_param = aggr_expr->get_param_expr(0))) {
-      ret = OB_ERR_UNEXPECTED;
+                  ret = OB_ERR_UNEXPECTED;
       LOG_WARN("get unexpected null", K(ret));
-    } else if (OB_FAIL(copier.copy(aggr_param, new_aggr_param))) {
+
+      }
+    else if (OB_FAIL(copier.copy(aggr_param, new_aggr_param))) {
       LOG_WARN("failed to copy expr", K(ret));
     } else if (OB_FAIL(deep_copy_subquery_for_aggr(*view_child_stmt,
                                                     new_aggr_param,
@@ -187,6 +240,9 @@ int ObTransformMinMax::do_minmax_transform(ObSelectStmt *select_stmt)
         LOG_WARN("failed to push back query ref expr", K(ret));
       }
     }
+  
+
+
     // adjust select_stmt
     if (OB_FAIL(ret)) {
     } else if (OB_FAIL(select_stmt->replace_relation_exprs(aggr_items, query_ref_exprs))) {
