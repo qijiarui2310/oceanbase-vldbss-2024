@@ -177,6 +177,7 @@ int ObTransformMinMax::do_single_minmax_transform(ObSelectStmt *select_stmt)
   }
   return ret;
 }
+
 int ObTransformMinMax::do_multi_minmax_transform(ObSelectStmt *select_stmt)
 {
   int ret = OB_SUCCESS;
@@ -195,75 +196,76 @@ int ObTransformMinMax::do_multi_minmax_transform(ObSelectStmt *select_stmt)
     ret = OB_INVALID_ARGUMENT;
     LOG_WARN("params have null", K(ret), K(select_stmt), K(ctx_));
   } else {
-    ObRawExprCopier copier(*ctx_->expr_factory_);
-    if (OB_FAIL(ObTransformUtils::create_simple_view(ctx_, select_stmt, view_child_stmt))) {
-      LOG_WARN("failed to create simple view", K(ret));
-    } else if (OB_FAIL(select_stmt->get_column_exprs(old_exprs))) {
-      LOG_WARN("failed to get column exprs", K(ret));
-    } else if (OB_FAIL(view_child_stmt->get_select_exprs(new_exprs))) {
-      LOG_WARN("failed to get select exprs", K(ret));
-    } else if (OB_FAIL(copier.add_replaced_expr(old_exprs, new_exprs))) {
-      LOG_WARN("failed to add replace pair", K(ret));
-    } 
-    
-    for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_aggr_item_size(); ++i) {
-     if (OB_ISNULL(aggr_expr = select_stmt->get_aggr_item(i))
-          || OB_ISNULL(aggr_param = aggr_expr->get_param_expr(0))) {
-                  ret = OB_ERR_UNEXPECTED;
-      LOG_WARN("get unexpected null", K(ret));
-
+      ObRawExprCopier copier(*ctx_->expr_factory_);
+      if (OB_FAIL(ObTransformUtils::create_simple_view(ctx_, select_stmt, view_child_stmt))) {
+          LOG_WARN("failed to create simple view", K(ret));
+      } else if (OB_FAIL(select_stmt->get_column_exprs(old_exprs))) {
+          LOG_WARN("failed to get column exprs", K(ret));
+      } else if (OB_FAIL(view_child_stmt->get_select_exprs(new_exprs))) {
+          LOG_WARN("failed to get select exprs", K(ret));
+      } else if (OB_FAIL(copier.add_replaced_expr(old_exprs, new_exprs))) {
+          LOG_WARN("failed to add replace pair", K(ret));
       }
-    else if (OB_FAIL(copier.copy(aggr_param, new_aggr_param))) {
-      LOG_WARN("failed to copy expr", K(ret));
-    } else if (OB_FAIL(deep_copy_subquery_for_aggr(*view_child_stmt,
-                                                    new_aggr_param,
-                                                    aggr_expr->get_expr_type(),
-                                                    child_stmt))) {
-      LOG_WARN("failed to deep copy subquery for aggr", K(ret));
-    } else if (OB_FAIL(aggr_items.push_back(aggr_expr))) {
-      LOG_WARN("failed to push back aggr item", K(ret));
-    } else if (OB_FAIL(ctx_->expr_factory_->create_raw_expr(T_REF_QUERY, query_ref_expr))) {
-      LOG_WARN("failed to create query ref expr", K(ret));
-    } else if (OB_ISNULL(query_ref_expr) || OB_ISNULL(child_stmt)
-                || OB_UNLIKELY(child_stmt->get_select_item_size() != 1)
-                || OB_ISNULL(target_expr = child_stmt->get_select_item(0).expr_)) {
-      ret = OB_ERR_UNEXPECTED;
-      LOG_WARN("unexpected null expr or select item size of child stmt", K(ret));
-    } else {
-      query_ref_expr->set_ref_stmt(child_stmt);
-      query_ref_expr->set_output_column(1);
-      if (OB_FAIL(query_ref_expr->add_column_type(target_expr->get_result_type()))) {
-        LOG_WARN("add column type to subquery ref expr failed", K(ret));
-      } else if (OB_FAIL(query_ref_expr->formalize(ctx_->session_info_))) {
-        LOG_WARN("failed to formalize coalesce query expr", K(ret));
-      } else if (OB_FAIL(query_ref_exprs.push_back(query_ref_expr))) {
-        LOG_WARN("failed to push back query ref expr", K(ret));
+
+      for (int64_t i = 0; OB_SUCC(ret) && i < select_stmt->get_aggr_item_size(); ++i) {
+          if (OB_ISNULL(aggr_expr = select_stmt->get_aggr_item(i))
+              || OB_ISNULL(aggr_param = aggr_expr->get_param_expr(0))) {
+              ret = OB_ERR_UNEXPECTED;
+              LOG_WARN("get unexpected null", K(ret));
+
+          } else if (OB_FAIL(copier.copy(aggr_param, new_aggr_param))) {
+              LOG_WARN("failed to copy expr", K(ret));
+          } else if (OB_FAIL(deep_copy_subquery_for_aggr(*view_child_stmt,
+                                                         new_aggr_param,
+                                                         aggr_expr->get_expr_type(),
+                                                         child_stmt))) {
+              LOG_WARN("failed to deep copy subquery for aggr", K(ret));
+          } else if (OB_FAIL(aggr_items.push_back(aggr_expr))) {
+              LOG_WARN("failed to push back aggr item", K(ret));
+          } else if (OB_FAIL(ctx_->expr_factory_->create_raw_expr(T_REF_QUERY, query_ref_expr))) {
+              LOG_WARN("failed to create query ref expr", K(ret));
+          } else if (OB_ISNULL(query_ref_expr) || OB_ISNULL(child_stmt)
+                     || OB_UNLIKELY(child_stmt->get_select_item_size() != 1)
+                     || OB_ISNULL(target_expr = child_stmt->get_select_item(0).expr_)) {
+              ret = OB_ERR_UNEXPECTED;
+              LOG_WARN("unexpected null expr or select item size of child stmt", K(ret));
+          } else {
+              query_ref_expr->set_ref_stmt(child_stmt);
+              query_ref_expr->set_output_column(1);
+              if (OB_FAIL(query_ref_expr->add_column_type(target_expr->get_result_type()))) {
+                  LOG_WARN("add column type to subquery ref expr failed", K(ret));
+              } else if (OB_FAIL(query_ref_expr->formalize(ctx_->session_info_))) {
+                  LOG_WARN("failed to formalize coalesce query expr", K(ret));
+              } else if (OB_FAIL(query_ref_exprs.push_back(query_ref_expr))) {
+                  LOG_WARN("failed to push back query ref expr", K(ret));
+              }
+          }
       }
-    }
-  
 
 
-    // adjust select_stmt
-    if (OB_FAIL(ret)) {
-    } else if (OB_FAIL(select_stmt->replace_relation_exprs(aggr_items, query_ref_exprs))) {
-      LOG_WARN("failed to replace aggr exprs to query ref exprs", K(ret));
-    } else if (OB_FAIL(select_stmt->get_condition_exprs().assign(select_stmt->get_having_exprs()))) {
-      LOG_WARN("failed to assign condition exprs", K(ret));
-    } else {
-      select_stmt->get_from_items().reset();
-      select_stmt->get_table_items().reset();
-      select_stmt->get_aggr_items().reset();
-      select_stmt->get_having_exprs().reset();
-      select_stmt->get_column_items().reset();
-      if (OB_FAIL(select_stmt->adjust_subquery_list())) {
-        LOG_WARN("failed to adjust subquery list", K(ret));
-      } else if (OB_FAIL(select_stmt->formalize_stmt(ctx_->session_info_))) {
-        LOG_WARN("failed to formalize stmt", K(ret));
+
+      // adjust select_stmt
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(select_stmt->replace_relation_exprs(aggr_items, query_ref_exprs))) {
+          LOG_WARN("failed to replace aggr exprs to query ref exprs", K(ret));
+      } else if (OB_FAIL(select_stmt->get_condition_exprs().assign(select_stmt->get_having_exprs()))) {
+          LOG_WARN("failed to assign condition exprs", K(ret));
       } else {
-        LOG_TRACE("succeed to do transform min max", KPC(select_stmt));
+          select_stmt->get_from_items().reset();
+          select_stmt->get_table_items().reset();
+          select_stmt->get_aggr_items().reset();
+          select_stmt->get_having_exprs().reset();
+          select_stmt->get_column_items().reset();
+          if (OB_FAIL(select_stmt->adjust_subquery_list())) {
+              LOG_WARN("failed to adjust subquery list", K(ret));
+          } else if (OB_FAIL(select_stmt->formalize_stmt(ctx_->session_info_))) {
+              LOG_WARN("failed to formalize stmt", K(ret));
+          } else {
+              LOG_TRACE("succeed to do transform min max", KPC(select_stmt));
+          }
       }
-    }
   }
+
   return ret;
 }
 
